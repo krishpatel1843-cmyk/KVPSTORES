@@ -532,7 +532,7 @@ app.get('/', (c) => {
                 </div>
                 <div class="w-px h-10 bg-white/20"></div>
                 <div class="text-center">
-                  <div class="text-2xl font-black">10k+</div>
+                  <div class="text-2xl font-black">120k+</div>
                   <div class="text-purple-200 text-xs">Happy Customers</div>
                 </div>
                 <div class="w-px h-10 bg-white/20"></div>

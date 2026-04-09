@@ -1,0 +1,10 @@
+{
+  "name": "kp-stores",
+  "main": "dist/_worker.js",
+  "compatibility_date": "2024-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist"
+  }
+}
