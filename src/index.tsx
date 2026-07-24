@@ -1,8 +1,93 @@
 import { Hono } from 'hono'
-import { jsxRenderer, useRequestContext } from 'hono/jsx-renderer'
+import { jsxRenderer } from 'hono/jsx-renderer'
+import { cors } from 'hono/cors'
+import { secureHeaders } from 'hono/secure-headers'
 import { products, categories, getProductsByCategory, getProductById, getFeaturedProducts } from './data/products'
 
 const app = new Hono()
+
+// ===================== SECURITY MIDDLEWARE =====================
+
+// 1. Force HTTPS redirect
+app.use('*', async (c, next) => {
+  const proto = c.req.header('x-forwarded-proto') || c.req.header('cf-visitor') || ''
+  if (proto.includes('http:')) {
+    return c.redirect(c.req.url.replace(/^http:\/\//, 'https://'), 301)
+  }
+  await next()
+})
+
+// 2. Hono built-in secure headers (HSTS, X-Frame-Options, X-Content-Type, etc.)
+app.use('*', secureHeaders({
+  strictTransportSecurity: 'max-age=31536000; includeSubDomains; preload',
+  xContentTypeOptions: 'nosniff',
+  xFrameOptions: 'DENY',
+  referrerPolicy: 'strict-origin-when-cross-origin',
+  permissionsPolicy: {
+    camera: [],
+    microphone: [],
+    geolocation: [],
+    paymentRequest: [],
+  },
+}))
+
+// 3. Full Content Security Policy + extra hardening headers
+app.use('*', async (c, next) => {
+  await next()
+  c.res.headers.set('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com",
+    "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net",
+    "img-src 'self' data: blob: https://sspark.genspark.ai https://*.genspark.ai",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self' https://kp-stores.printify.me",
+    "upgrade-insecure-requests",
+  ].join('; '))
+  c.res.headers.set('X-Permitted-Cross-Domain-Policies', 'none')
+  c.res.headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
+  c.res.headers.set('Cross-Origin-Resource-Policy', 'same-origin')
+  c.res.headers.set('X-DNS-Prefetch-Control', 'off')
+})
+
+// 4. CORS — restrict API to known origins only
+app.use('/api/*', cors({
+  origin: [
+    'https://kp-stores.krishpatel1843.workers.dev',
+    'https://kp-stores.printify.me',
+  ],
+  allowMethods: ['GET'],
+  allowHeaders: ['Content-Type'],
+  maxAge: 86400,
+}))
+
+// 5. Rate limiting — 120 requests / minute per IP
+const _rl = new Map<string, { n: number; t: number }>()
+app.use('*', async (c, next) => {
+  const ip = c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'unknown'
+  const now = Date.now()
+  const win = 60_000; const lim = 120
+  const e = _rl.get(ip)
+  if (e && now - e.t < win) {
+    if (++e.n > lim) return c.text('Too Many Requests', 429)
+  } else {
+    _rl.set(ip, { n: 1, t: now })
+    if (_rl.size > 5000) for (const [k, v] of _rl) if (now - v.t > win) _rl.delete(k)
+  }
+  await next()
+})
+
+// 6. Block common attack patterns (SQLi, XSS, path traversal, etc.)
+app.use('*', async (c, next) => {
+  const url = c.req.url.toLowerCase()
+  const bad = ['../', '.env', 'wp-admin', 'phpinfo', '/.git', '/etc/passwd',
+    'select%20', 'union%20select', '<script', 'javascript:', 'onerror=', 'onload=']
+  if (bad.some(p => url.includes(p))) return c.text('Forbidden', 403)
+  await next()
+})
 
 // Layout renderer
 app.use(
@@ -15,6 +100,12 @@ app.use(
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>{title || 'KP Stores — Products You\'ll Love'}</title>
           <meta name="description" content="Explore KP Stores — curated custom print-on-demand products including apparel, mugs, accessories and more. Powered by Printify." />
+          {/* Security meta tags */}
+          <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+          <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+          <meta name="referrer" content="strict-origin-when-cross-origin" />
+          <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+          <meta name="robots" content="index, follow" />
           <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛍️</text></svg>" />
           <script src="https://cdn.tailwindcss.com"></script>
           <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet" />
@@ -105,6 +196,11 @@ app.use(
 
                 {/* Right Actions */}
                 <div class="flex items-center gap-3">
+                  {/* HTTPS Secure Badge */}
+                  <div class="hidden sm:flex items-center gap-1 bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                    <i class="fas fa-lock text-green-600" style="font-size:10px"></i>
+                    <span>Secure</span>
+                  </div>
                   <button onclick="toggleSearch()" class="p-2 text-gray-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-all">
                     <i class="fas fa-search text-lg"></i>
                   </button>
@@ -218,6 +314,18 @@ app.use(
               </div>
               <div class="border-t border-white/10 mt-10 pt-6 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-500">
                 <p>© 2024 KP Stores. All rights reserved. Powered by <a href="https://printify.com" class="text-purple-400 hover:underline">Printify</a></p>
+                {/* Security Trust Badges */}
+                <div class="flex flex-wrap items-center gap-3 justify-center">
+                  <span class="flex items-center gap-1 bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg text-green-400">
+                    <i class="fas fa-lock text-xs"></i> SSL / TLS Encrypted
+                  </span>
+                  <span class="flex items-center gap-1 bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg text-blue-400">
+                    <i class="fas fa-shield-alt text-xs"></i> Cloudflare Protected
+                  </span>
+                  <span class="flex items-center gap-1 bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg text-purple-400">
+                    <i class="fas fa-user-shield text-xs"></i> HTTPS Enforced
+                  </span>
+                </div>
                 <div class="flex gap-4">
                   <a href="/privacy" class="hover:text-gray-300">Privacy Policy</a>
                   <a href="/terms" class="hover:text-gray-300">Terms of Service</a>
