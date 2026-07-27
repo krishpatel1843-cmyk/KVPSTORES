@@ -43,7 +43,7 @@ app.use('*', async (c, next) => {
     "connect-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
-    "form-action 'self' https://kp-stores.printify.me",
+    "form-action 'self' https://kpstores.online https://www.kpstores.online https://kp-stores.printify.me",
     "upgrade-insecure-requests",
   ].join('; '))
   c.res.headers.set('X-Permitted-Cross-Domain-Policies', 'none')
@@ -55,6 +55,8 @@ app.use('*', async (c, next) => {
 // 4. CORS — restrict API to known origins only
 app.use('/api/*', cors({
   origin: [
+    'https://kpstores.online',
+    'https://www.kpstores.online',
     'https://kp-stores.krishpatel1843.workers.dev',
     'https://kp-stores.printify.me',
   ],
